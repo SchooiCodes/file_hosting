@@ -51,7 +51,7 @@ Try {
             throw [WingetFailedInstall]::new('Failed to install!')
         }
     }
-}
+
 
 # get latest download url
 $URL = "https://api.github.com/repos/microsoft/winget-cli/releases/latest"
