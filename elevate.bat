@@ -6,4 +6,3 @@ fltmc >nul 2>&1 || (
     exit 0
 )
 cls
-goto start
