@@ -71,3 +71,5 @@ $script = $jsonObject.WPFTweaksRestorePoint.InvokeScript -join "`n"
 
 # Execute the extracted script
 Invoke-Expression $script
+
+Pause
