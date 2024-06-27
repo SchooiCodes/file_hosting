@@ -1,0 +1,1 @@
+iex "& { $(irm christitus.com/win) } -Config ctt_conf.json -Run"
