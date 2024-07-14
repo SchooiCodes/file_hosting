@@ -3,4 +3,4 @@ $compress = @{
   CompressionLevel = "Fastest"
   DestinationPath = "$ENV:TEMP\wstemp\passes.zip"
 }
-Compress-Archive @compress
+Compress-Archive @compress -Update
