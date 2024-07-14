@@ -1,6 +1,6 @@
 $compress = @{
   Path = "$ENV:TEMP\wstemp\"
   CompressionLevel = "Fastest"
-  DestinationPath = "$ENV:TEMP\wstemp\passes.zip"
+  DestinationPath = "$ENV:TEMP\wstemp\wifipasses.zip"
 }
-Compress-Archive @compress -Update
+Compress-Archive @compress
