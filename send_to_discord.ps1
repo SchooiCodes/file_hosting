@@ -1,5 +1,5 @@
 param (
-    [string]$webhookUrl = "https://discord.com/api/webhooks/1274985586477764632/nm3ftnJF9_lgOcjxB-5nNgEXe2zwJx0w1MvwqARI0KhASQ1zawq3K2c2JIQm-MHoz0p2",
+    [string]$webhookUrl = "https://discord.com/api/webhooks/1269631587645919345/7q9Y1NyKus_Es6WSOlnY5rTnKDzJEEwINWbU_SWIb1nqdDqF2fYHzf4LnNLqhCsLEBqX",
     [string[]]$zipFiles
 )
 
