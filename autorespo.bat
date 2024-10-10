@@ -25,5 +25,7 @@ powershell -Command "iex .\autorespo.ps1"
 ::    echo Error! Errorlevel: %errorlevel%
 ::)
 echo Press any key to exit.
+del ar.txt
+del autorespo.ps1
 pause >nul
 exit
