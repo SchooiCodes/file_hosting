@@ -49,6 +49,7 @@ echo Would you like to restart? ([Y]es/[N]o)
 set /p rest=^> 
 if /i "%rest%"=="Y" shutdown -r -t 10
 timeout /t 2 /NOBREAK >nul
+goto :EOF
 
 :print
 echo.
