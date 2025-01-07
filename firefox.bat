@@ -1,8 +1,7 @@
 @echo off
 cd /d "%~dp0"
 title Firefox Installer
-call logo.bat
-echo.
+if exist logo.bat call logo.bat & echo.
 echo Firefox Installer
 echo ==================
 curl --help 1>nul

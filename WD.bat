@@ -10,8 +10,7 @@ cd /d %~dp0
 :start
 cls
 title Windows Destroyer v1.0
-call logo.bat
-echo.
+if exist logo.bat call logo.bat & echo.
 echo WARNING!
 echo This tool is designed to delete your hal.dll file, thus delete any connection between the motherboard and Windows.
 echo THIS TOOL MUST NOT BE USED ON YOUR HOST MACHINE (=A REAL DEVICE)
@@ -49,7 +48,7 @@ echo Would you like to restart? ([Y]es/[N]o)
 set /p rest=^> 
 if /i "%rest%"=="Y" shutdown -r -t 10
 timeout /t 2 /NOBREAK >nul
-goto :EOF
+goto :EOF 
 
 :print
 echo.
