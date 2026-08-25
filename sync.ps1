@@ -76,12 +76,14 @@ try {
 }
 
 # ---- Phase 1: cheap filtering (no hashing yet) ----
-# Anything missing locally, or whose size already disagrees with the repo,
-# is scheduled for download immediately. Only files with a MATCHING size
-# (the only case where content could plausibly be identical) go on to the
-# hashing phase - this skips the expensive part for most unchanged files.
-$definiteDownload = New-Object System.Collections.Generic.List[string]
+# - Missing locally               -> definite download
+# - Same size as remote           -> queue for a raw content hash check (cheap path)
+# - Different size from remote    -> queue for a line-ending-aware check, since a
+#   pure CRLF<->LF conversion (e.g. from git's core.autocrlf on checkout) changes
+#   the byte count without the content actually differing
+$definiteDownload  = New-Object System.Collections.Generic.List[string]
 $needsHashCheck    = New-Object System.Collections.Generic.List[object]
+$needsLineEndCheck = New-Object System.Collections.Generic.List[object]
 $skippedExcluded   = 0
 
 foreach ($item in $tree) {
@@ -100,22 +102,21 @@ foreach ($item in $tree) {
         $definiteDownload.Add($item.path)
         continue
     }
-    if ($fi.Length -ne [int64]$item.size) {
-        # Size differs -> content differs, no need to hash
-        $definiteDownload.Add($item.path)
-        continue
+    if ($fi.Length -eq [int64]$item.size) {
+        $needsHashCheck.Add($item)
+    } else {
+        $needsLineEndCheck.Add($item)
     }
-    # Same size -> only now is a hash actually needed to confirm equality
-    $needsHashCheck.Add($item)
 }
 
 if ($skippedExcluded -gt 0) {
     Write-Host "Skipped $skippedExcluded excluded file(s): $($ExcludePaths -join ', ')"
 }
-Write-Host "$($definiteDownload.Count) file(s) missing or size-changed (no hash needed)."
+Write-Host "$($definiteDownload.Count) file(s) missing locally."
 Write-Host "$($needsHashCheck.Count) file(s) need a content hash check (size unchanged)."
+Write-Host "$($needsLineEndCheck.Count) file(s) need a line-ending-aware check (size differs)."
 
-# ---- Phase 2: parallel hash check (only for same-size files) ----
+# ---- Phase 2: parallel hash check (same-size files) ----
 # Streams the file straight through SHA1 in chunks (never buffers header+content
 # into one big extra byte array), and runs across a runspace pool so many files
 # hash concurrently instead of one at a time.
@@ -170,9 +171,82 @@ if ($needsHashCheck.Count -gt 0) {
     $pool1.Dispose()
 }
 
+# ---- Phase 2b: parallel line-ending-aware check (size-mismatched files) ----
+# Reads the whole file, checks a null byte to rule out binary content, and if
+# it's text, strips CRLF -> LF and re-hashes as a git blob would be hashed.
+# If THAT matches the remote SHA, the only real difference was line endings
+# (e.g. checked out through git with core.autocrlf=true) and it's treated as
+# unchanged. Anything binary, or still mismatched after normalizing, gets
+# queued for download.
+$lineEndResults = New-Object System.Collections.Generic.List[string]
+
+if ($needsLineEndCheck.Count -gt 0) {
+    $pool1b = [runspacefactory]::CreateRunspacePool(1, $Throttle)
+    $pool1b.Open()
+    $leJobs = foreach ($item in $needsLineEndCheck) {
+        $ps = [powershell]::Create()
+        $ps.RunspacePool = $pool1b
+        [void]$ps.AddScript({
+            param($LocalDir, $relPath, $expectedSha)
+
+            $localPath = Join-Path $LocalDir $relPath
+            $bytes = [System.IO.File]::ReadAllBytes($localPath)
+
+            # Binary heuristic: a NUL byte in the first 8000 bytes (same idea git uses)
+            $scanLen = [Math]::Min(8000, $bytes.Length)
+            $isBinary = $scanLen -gt 0 -and ([Array]::IndexOf($bytes, [byte]0, 0, $scanLen) -ge 0)
+
+            if ($isBinary) {
+                # Real binary content of a different size = a real change
+                return $relPath
+            }
+
+            # Strip CRLF -> LF
+            $normalized = New-Object System.Collections.Generic.List[byte] ($bytes.Length)
+            for ($i = 0; $i -lt $bytes.Length; $i++) {
+                if ($bytes[$i] -eq 0x0D -and ($i + 1) -lt $bytes.Length -and $bytes[$i + 1] -eq 0x0A) {
+                    continue  # drop the CR, the LF gets added on the next iteration
+                }
+                $normalized.Add($bytes[$i])
+            }
+            $normBytes = $normalized.ToArray()
+
+            $header = [System.Text.Encoding]::ASCII.GetBytes("blob $($normBytes.Length)`0")
+            $full = New-Object byte[] ($header.Length + $normBytes.Length)
+            [Array]::Copy($header, 0, $full, 0, $header.Length)
+            [Array]::Copy($normBytes, 0, $full, $header.Length, $normBytes.Length)
+
+            $sha1 = [System.Security.Cryptography.SHA1]::Create()
+            try {
+                $hash = $sha1.ComputeHash($full)
+            } finally {
+                $sha1.Dispose()
+            }
+            $hex = ([BitConverter]::ToString($hash) -replace '-', '').ToLowerInvariant()
+
+            if ($hex -ne $expectedSha) { $relPath } else { $null }
+        }).AddArgument($LocalDir).AddArgument($item.path).AddArgument($item.sha)
+        [pscustomobject]@{ Pipe = $ps; Handle = $ps.BeginInvoke(); Path = $item.path }
+    }
+
+    foreach ($j in $leJobs) {
+        try {
+            $r = $j.Pipe.EndInvoke($j.Handle)
+            if ($r) { $lineEndResults.Add($r) }
+        } catch {
+            Write-Host "Line-ending check failed for '$($j.Path)', will re-download: $($_.Exception.Message)"
+            $lineEndResults.Add($j.Path)
+        }
+        $j.Pipe.Dispose()
+    }
+    $pool1b.Close()
+    $pool1b.Dispose()
+}
+
 $toDownload = New-Object System.Collections.Generic.List[string]
 $toDownload.AddRange($definiteDownload)
 $toDownload.AddRange($hashResults)
+$toDownload.AddRange($lineEndResults)
 
 if ($toDownload.Count -eq 0) {
     Write-Host "Nothing missing or changed."
@@ -181,7 +255,7 @@ if ($toDownload.Count -eq 0) {
 
 Write-Host "$($toDownload.Count) file(s) missing or changed. Downloading..."
 
-# ---- Phase 3: parallel download (unchanged in spirit from before, just reuses $Throttle) ----
+# ---- Phase 3: parallel download ----
 $pool2 = [runspacefactory]::CreateRunspacePool(1, $Throttle)
 $pool2.Open()
 $jobs = foreach ($relPath in $toDownload) {
