@@ -3,7 +3,8 @@ param(
     [string]$Repo   = "smt",
     [string]$Branch = "",
     [string]$LocalDir = $PSScriptRoot,
-    [int]$Throttle = 8
+    [int]$Throttle = 8,
+    [string[]]$ExcludePaths = @("config/settings.ini")
 )
 
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -22,6 +23,27 @@ function Get-GitHubErrorBody($exception) {
     }
     return $exception.Exception.Message
 }
+
+function Normalize-RelPath($p) {
+    return ($p -replace '\\', '/').ToLowerInvariant()
+}
+
+function Get-GitBlobSha([string]$path) {
+    $bytes = [System.IO.File]::ReadAllBytes($path)
+    $header = [System.Text.Encoding]::ASCII.GetBytes("blob $($bytes.Length)`0")
+    $full = New-Object byte[] ($header.Length + $bytes.Length)
+    [Array]::Copy($header, 0, $full, 0, $header.Length)
+    [Array]::Copy($bytes, 0, $full, $header.Length, $bytes.Length)
+    $sha1 = [System.Security.Cryptography.SHA1]::Create()
+    try {
+        $hash = $sha1.ComputeHash($full)
+    } finally {
+        $sha1.Dispose()
+    }
+    return ([BitConverter]::ToString($hash) -replace '-', '').ToLowerInvariant()
+}
+
+$normalizedExcludes = $ExcludePaths | ForEach-Object { Normalize-RelPath $_ }
 
 if (-not $Branch) {
     Write-Host "Detecting default branch..."
@@ -67,21 +89,56 @@ try {
     return
 }
 
-$missing = foreach ($item in $tree) {
+$toDownload = New-Object System.Collections.Generic.List[string]
+$skippedExcluded = 0
+
+foreach ($item in $tree) {
+    $relNorm = Normalize-RelPath $item.path
+
+    $isExcluded = $false
+    foreach ($ex in $normalizedExcludes) {
+        if ($relNorm -eq $ex -or $relNorm -like "*/$ex") {
+            $isExcluded = $true
+            break
+        }
+    }
+    if ($isExcluded) {
+        $skippedExcluded++
+        continue
+    }
+
     $localPath = Join-Path $LocalDir $item.path
-    if (-not (Test-Path -LiteralPath $localPath)) { $item.path }
+
+    if (-not (Test-Path -LiteralPath $localPath)) {
+        $toDownload.Add($item.path)
+        continue
+    }
+
+    try {
+        $localSha = Get-GitBlobSha -path $localPath
+        if ($localSha -ne $item.sha) {
+            $toDownload.Add($item.path)
+        }
+    } catch {
+        Write-Host "Could not hash local file '$($item.path)', will re-download: $($_.Exception.Message)"
+        $toDownload.Add($item.path)
+    }
 }
 
-if (-not $missing) {
-    Write-Host "Nothing missing."
+if ($skippedExcluded -gt 0) {
+    Write-Host "Skipped $skippedExcluded excluded file(s): $($ExcludePaths -join ', ')"
+}
+
+if ($toDownload.Count -eq 0) {
+    Write-Host "Nothing missing or changed."
     return
 }
 
-Write-Host "$($missing.Count) missing file(s). Downloading..."
+Write-Host "$($toDownload.Count) file(s) missing or changed. Downloading..."
 
 $pool = [runspacefactory]::CreateRunspacePool(1, $Throttle)
 $pool.Open()
-$jobs = foreach ($relPath in $missing) {
+$jobs = foreach ($relPath in $toDownload) {
     $ps = [powershell]::Create()
     $ps.RunspacePool = $pool
     [void]$ps.AddScript({
